@@ -1,129 +1,311 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
+#define CHA 0
+#define ENA 19 
+#define IN1 18
+#define IN2 5
+const int CCW = 2; 
+const int CW  = 1; 
+#define motor 1 
+L298N_DC_motor motor(IN1, IN2, ENA, CHA);  
 
-# C extensions
-*.so
+int           motor1Direction = CW;//default direction of rotation
+const int  motor1changeStep = 10;// 10 is 10% every time button is pushed
+int             motor1Speed = 40;// variable holding the light output vlaue (initial value) 40 means 40%
+const int   motor1MinimumSpeed=20;
+const int motor1MaximumSpeed=100;
+int          motor1StopState=HIGH;//Stope state of motor (HIGH means STOP) and LOW means Start
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+#include "ESP32_L298N_DC_motor_wifi_page.h"  
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
+const char *ssid = "oppo";
+const char *password = "dos12345";
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+WebServer server(80);
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
+const int led = 13;
+void handleRoot() {
+String HTML_page = motorControlHeader_1; 
 
-# Translations
-*.mo
-*.pot
+ HTML_page.concat(".bar1 {width: " + String(motorSpeed)  + "%;}\n");
+  
+ HTML_page.concat(motorControlHeader_2);
+  
+ HTML_page.concat(motor1Control_p1);
+   
+ if(motorDirection ==CW)
+ {
+      if(motorStopState ==HIGH)
+      {
+        HTML_page.concat("<strong>Stopped - CW at ");
+      }else{
+        HTML_page.concat("<strong>Running - CW at ");        
+      }
+ }else{
+      if(motor1StopState ==HIGH)
+      {
+        HTML_page.concat("<strong>Stopped - CCW at ");
+      }else{
+        HTML_page.concat("<strong>Running - CCW at ");        
+      }  
+ }
+ HTML_page.concat(motorSpeed);
+ HTML_page.concat(motorControl_p2);
+ if(motor1StopState ==HIGH)
+ {
+   HTML_page.concat("mSTART\">START");
+ }else{
+   HTML_page.concat("mSTOP\">STOP"); 
+ }
+ HTML_page.concat(motorControl_p3); 
+ 
+ HTML_page.concat("</body>\n</html>"); 
+  server.send(200, "text/html", HTML_page);
+}
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
+void handleNotFound() {
+  digitalWrite(led, 1);
+  String message = "File Not Found\n\n";
+  message += "URI: ";
+  message += server.uri();
+  message += "\nMethod: ";
+  message += (server.method() == HTTP_GET) ? "GET" : "POST";
+  message += "\nArguments: ";
+  message += server.args();
+  message += "\n";
 
-# Flask stuff:
-instance/
-.webassets-cache
+  for (uint8_t i = 0; i < server.args(); i++) {
+    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+  }
+  server.send(404, "text/plain", message);
+  digitalWrite(led, 0);
+}
+void setup(void) {
+  Serial.begin(115200);
+  motor.begin();
 
-# Scrapy stuff:
-.scrapy
+  //L298N DC Motor 
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  Serial.println(""); 
+    
+  // Wait for connection
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
 
-# Sphinx documentation
-docs/_build/
+  Serial.println("");
+  Serial.print("Connected to ");
+  Serial.println(ssid);
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
 
-# PyBuilder
-target/
 
-# Jupyter Notebook
-.ipynb_checkpoints
+  if (MDNS.begin("ESP32")) {
+    Serial.print("MDNS responder started at http://");
+    Serial.println("ESP32");
+  }
 
-# IPython
-profile_default/
-ipython_config.py
+  server.on("/", handleRoot);
+  server.on("/speed", HTTP_GET, handleMotorSpeed);  
+  server.on("/direction", HTTP_GET, handleMotorDirection); 
+  server.on("/stop", HTTP_GET, handleMotorBrake);     
+  server.onNotFound(handleNotFound);
+  server.begin();
+  Serial.println("HTTP server started"); 
+}
 
-# pyenv
-.python-version
+void loop(void) {
+  server.handleClient();
+  if(motorStopState ==HIGH)
+  {
+    motor.brake(motor1);  
+    
+  }else{
+     motor.rotate(motor, motorSpeed, motorDirection);
+  }  
 
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
+  delay(100);  
+}
+void handleMotorSpeed() {
+  if(server.arg("do") == "mslower" )
+  {
+    motor1Speed -=motorchangeStep;
+    
+      if(motor1Speed < motorMinimumSpeed)
+      {
+        motor1Speed = motorMinimumSpeed;
+      }
+  }else if(server.arg("do") == "mfaster")
+  {
+    motor1Speed +=motorchangeStep;   
+     
+      if(motor1Speed > motorMaximumSpeed)
+      {
+        motor1Speed =motorMaximumSpeed;
+      } 
+  }else{
+    motorSpeed =0;   
+  }
+  handleRoot();
+}//handleMotorSpeed() end
+void handleMotorDirection() {
+  if(server.arg("dir") == "mCW")
+  {
+    motor1Direction =CW;
+  }else if(server.arg("dir") == "mCCW")
+  {
+    motor1Direction =CCW;
 
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow
-__pypackages__/
+  }
+  handleRoot();
+}//
+void handleMotorBrake() {
+  if(server.arg("do") == "mSTART")
+  {  
+      motor1StopState=LOW;
+  }else if(server.arg("do") == "mSTOP")
+  {  
+      motor1StopState=HIGH;
+  }
+  handleRoot();
+}//
 
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
+Program tampilan browser pengendali motor DC menggunakan software Arduino 1.8.7
 
-# SageMath parsed files
-*.sage.py
+const char motorControlHeader_1[]  PROGMEM = R"header1(
+<!DOCTYPE html>
+<html>
+<head>
+<title>ESP32 Motor Control</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+* {box-sizing: border-box}
+.table{
+    width:100%;
+    display:table;
+}
+.row{
+    display:table-row;
+}
 
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+.fixedCell {
+    width:15%;
+    display:table-cell;
+}
+.cell{
+    display: table-cell;
+    background: green;
+}
+.progress_bar {
+  font-size: 20px;  
+  text-align: right;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  padding-right:10px;
+  color: white;
+  float:left;
+  background-color:#0ad164;  
+}
+.buttonsDiv {
+  display: flex;
+  justify-content: center;
+  float:auto;
+}
+.startStop{
+     font-size: 20px;
+   background-color: #8019d4;
+    color: #ffffff;
+    border-color: #f44336;  
+    border: none;
+    display: inline-block;
+    padding: 7px 10px;
+    vertical-align: middle;    
+}
+)header1";
+const char motorControlHeader_2[] PROGMEM = R"( 
+.nextprev a.rj-right, .nextprev a.rj-left {
+    background-color: #f44336;
+    color: #ffffff;
+    border-color: #f44336;
+}
+.nextprev a {
+    font-size: 20px;
+    border: 1px solid #cccccc;
+}
+.rj-right {
+    float: right!important;
+}
+.rj-left {
+    float: left!important;
+}
+.rj-btn, .rj-button {
+    border: none;
+    display: inline-block;
+    padding: 7px 10px;
+    vertical-align: middle;
+    overflow: hidden;
+    text-decoration: none;
+    color: inherit;
+    background-color: inherit;
+    text-align: center;
+    cursor: pointer;
+    white-space: nowrap;
+}
+</style>
+</head>
+<body>
 
-# Spyder project settings
-.spyderproject
-.spyproject
+<h1>ESP32 Speed and Direction Control</h1>)";
 
-# Rope project settings
-.ropeproject
+const char motorControl_p1[] PROGMEM = R"(
+<h2>Motor Control</h2>
+<div class="table">
+    <div class="row">
+        <div class="fixedCell">
+            <div class="nextprev">
+            <a class=" left btn" href="/speed?do=mslower">< Slower</a>
+            </div>        
 
-# mkdocs documentation
-/site
+        </div><!--fixedCell -->
 
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
+        <div class="progress_bar bar1">)";
 
-# Pyre type checker
-.pyre/
+const char motorControl_p2[] PROGMEM = R"(%</strong></div> 
+
+        <div class="fixedCell">
+        
+          <div class="nextprev">       
+          <a class="right btn" href="/speed?do=mfaster">Faster ></a>
+          </div>       
+        </div><!--fixedCell -->
+    </div><!--row -->
+
+</div><!--table -->
+<hr align="center" width="50%">
+<div class="table">
+    <div class="row">
+        <div class="fixedCell">
+            <div class="nextprev">
+            <a class="left btn" href="/direction?dir=mCCW">CCW</a>
+            </div>        
+        </div><!--fixedCell -->
+        <div class="buttonsDiv">
+            <a class="startStop" href="/stop?do=)";
+            
+ 
+const char motor1Control_p3[] PROGMEM = R"(            
+            </a>
+        </div> 
+
+        <div class="fixedCell">
+        
+          <div class="nextprev">       
+          <a class="right btn" href="/direction?dir=mCW">CW</a>
+          </div>       
+        </div><!--fixedCell -->
+    </div><!--row --->
+</div>
